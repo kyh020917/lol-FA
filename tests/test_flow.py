@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from db.database import Database
 from services.reporter import Reporter
-from services.riot_api import RiotError
+from services.riot_api import RiotAuthError, RiotError
 from services.tracker import Tracker
 
 PUUID = "puuid-1"
@@ -45,6 +45,8 @@ class FakeRiot:
         return self.entries
 
     async def get_match(self, match_id):
+        if self.match == "forbidden":   # Riot이 결과를 제공하지 않는 경기 (403)
+            raise RiotAuthError(403, "접근 거부됨 [/lol/match/v5/matches/KR_1] Forbidden")
         return self.match
 
     async def get_account_by_puuid(self, puuid):
@@ -174,6 +176,25 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await self.tracker.poll_all()
         self.assertEqual((await self.db.get_account(old_id))["puuid"], PUUID)
         self.assertGreaterEqual(len(self.sent), 2)             # 두 계정 모두 시작 알림
+
+    async def test_forbidden_match_is_given_up(self):
+        """결과 조회가 계속 403이면 영원히 재시도하지 않고 포기한다."""
+        self.riot.game = make_game(7)
+        self.riot.entries = solo("GOLD", "II", 10)
+        await self.tracker.poll_all()
+        self.assertEqual(len(self.sent), 1)                    # 시작 알림만
+        self.riot.game = None
+        self.riot.match = "forbidden"
+        for _ in range(4):
+            await self.tracker.poll_all()
+            self.assertIsNotNone(await self.db.get_active(self.acc_id))   # 아직 재시도 중
+        await self.tracker.poll_all()                           # 5번째 - 포기
+        self.assertIsNone(await self.db.get_active(self.acc_id))
+        self.assertEqual(len(self.sent), 1)                    # 종료 알림은 없음
+        # 다음 게임은 정상 동작
+        self.riot.match = None
+        await self.play(8, True, solo("GOLD", "II", 10), solo("GOLD", "II", 28))
+        self.assertIn("승리", self.sent[-1][0].title)
 
     async def test_remake_and_filter(self):
         await self.db.update_settings(self.acc_id, queue_filter="solo")

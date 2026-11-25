@@ -14,7 +14,8 @@ from utils.queues import RANKED_QUEUES, queue_allowed
 log = logging.getLogger(__name__)
 
 MAX_MATCH_RETRIES = 40   # 매치 데이터가 안 올라올 때 (약 30분) 포기
-MAX_LP_RETRIES = 3       # LP 반영이 늦을 때 추가로 기다리는 횟수
+MAX_FORBIDDEN_RETRIES = 5  # 결과 조회가 403일 때 (약 4분) 포기
+MAX_LP_RETRIES = 3      # LP 반영이 늦을 때 추가로 기다리는 횟수
 REMAKE_SECONDS = 300
 
 
@@ -145,7 +146,19 @@ class Tracker(Notifier):
     async def finalize(self, acc: dict, active: dict) -> None:
         db, riot, dd = self.bot.db, self.bot.riot, self.bot.ddragon
 
-        match = await riot.get_match(f"KR_{active['game_id']}")
+        try:
+            match = await riot.get_match(f"KR_{active['game_id']}")
+        except RiotAuthError as e:
+            if not await self._key_is_valid():
+                raise
+            # 키는 정상 - 이 경기 결과만 Riot이 제공하지 않음 (커스텀/연습 게임 등). 몇 번 보고 포기한다.
+            if active["attempts"] + 1 >= MAX_FORBIDDEN_RETRIES:
+                log.warning("계정 %s: 게임 %s 결과를 Riot이 제공하지 않아 건너뜁니다. (%s)",
+                            acc["id"], active["game_id"], e)
+                await db.delete_active(acc["id"])
+            else:
+                await db.bump_attempts(acc["id"])
+            return
         if match is None:
             if active["attempts"] + 1 >= MAX_MATCH_RETRIES:
                 log.warning("계정 %s: 게임 %s 결과를 가져오지 못해 포기합니다.", acc["id"], active["game_id"])
