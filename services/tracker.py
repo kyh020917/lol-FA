@@ -47,9 +47,9 @@ class Tracker(Notifier):
             try:
                 await self.poll_account(acc)
                 self._auth_warned = False
-            except RiotAuthError:
+            except RiotAuthError as e:
                 if not self._auth_warned:
-                    log.error("Riot API 키가 만료되었거나 올바르지 않습니다. .env 의 RIOT_API_KEY 를 갱신하고 재시작하세요.")
+                    log.error("Riot API 키 오류: %s - RIOT_API_KEY 를 갱신하고 재시작하세요.", e)
                     self._auth_warned = True
                 return
             except RiotError as e:

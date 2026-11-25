@@ -7,11 +7,11 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from config import Config, load_config
+from config import Config, load_config, mask_key
 from db.database import Database
 from services.ddragon import DDragon
 from services.reporter import Reporter
-from services.riot_api import RiotClient
+from services.riot_api import RiotAuthError, RiotClient, RiotError
 from services.tracker import Tracker
 
 log = logging.getLogger("lol-alert-bot")
@@ -28,6 +28,17 @@ class LolAlertBot(commands.Bot):
         self.db = Database(self.cfg.db_path)
         await self.db.connect()
         self.riot = RiotClient(self.session, self.cfg.riot_api_key)
+        log.info("사용 중인 Riot 키: %s", mask_key(self.cfg.riot_api_key))
+        if self.cfg.riot_key_conflict:
+            log.warning("환경변수 RIOT_API_KEY 와 .env 파일의 키가 서로 달라요. 환경변수 값이 우선 사용됩니다. "
+                        "호스트의 예전 환경변수를 지우거나 새 키로 바꿔주세요.")
+        try:
+            await self.riot.check_key()
+            log.info("Riot 키 확인: 정상")
+        except RiotAuthError as e:
+            log.error("Riot 키 확인 실패: %s", e)
+        except RiotError as e:
+            log.warning("Riot 키 확인 중 오류(네트워크 등): %s", e)
         self.ddragon = DDragon(self.session)
         try:
             await self.ddragon.load()

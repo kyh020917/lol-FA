@@ -70,7 +70,7 @@ class RiotClient:
                     if resp.status == 404:
                         return None
                     if resp.status in (401, 403):
-                        raise RiotAuthError(resp.status, "API 키가 만료되었거나 올바르지 않습니다.")
+                        raise RiotAuthError(resp.status, f"API 키 거부됨 - {(await resp.text())[:120]}")
                     if resp.status == 429:
                         wait = float(resp.headers.get("Retry-After", 5))
                         log.warning("Riot 요청 제한(429) - %.1f초 대기", wait)
@@ -100,6 +100,10 @@ class RiotClient:
                 self._cache.pop(next(iter(self._cache)))
             self._cache[key] = (time.monotonic() + cache_ttl, data)
         return data
+
+    async def check_key(self) -> None:
+        """키가 유효하지 않으면 RiotAuthError. 시작할 때 한 번 호출."""
+        await self._request(f"{PLATFORM_HOST}/lol/status/v4/platform-data", None)
 
     # ---- 엔드포인트 ----
     async def get_account(self, game_name: str, tag_line: str) -> dict | None:
