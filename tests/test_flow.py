@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from db.database import Database
 from services.reporter import Reporter
+from services.riot_api import RiotError
 from services.tracker import Tracker
 
 PUUID = "puuid-1"
@@ -30,7 +31,15 @@ class FakeRiot:
         self.match = None
 
     async def get_active_game(self, puuid):
+        if puuid == "old-puuid":   # 예전 키로 저장된 PUUID
+            raise RiotError(400, "Bad Request - Exception decrypting abc")
         return self.game
+
+    async def get_account(self, name, tag):
+        return {"puuid": PUUID, "gameName": name, "tagLine": tag}
+
+    async def check_key(self):
+        return None
 
     async def get_league_entries(self, puuid):
         return self.entries
@@ -156,6 +165,15 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
 
         await self.reporter.send_reports(today)                 # 중복 전송 방지
         self.assertEqual(len(self.sent), before + 1)
+
+    async def test_stale_puuid_is_repaired(self):
+        """키를 바꿔 PUUID가 안 맞으면 닉네임#태그로 다시 조회해서 고치고 계속 동작한다."""
+        old_id = await self.db.add_account(2, 20, "old-puuid", "Old", "KR1", 1)
+        self.riot.game = make_game(5)
+        self.riot.entries = solo("GOLD", "II", 10)
+        await self.tracker.poll_all()
+        self.assertEqual((await self.db.get_account(old_id))["puuid"], PUUID)
+        self.assertGreaterEqual(len(self.sent), 2)             # 두 계정 모두 시작 알림
 
     async def test_remake_and_filter(self):
         await self.db.update_settings(self.acc_id, queue_filter="solo")

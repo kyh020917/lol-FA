@@ -138,6 +138,9 @@ class Database:
     async def update_channel(self, account_id: int, channel_id: int) -> None:
         await self._exec("UPDATE accounts SET channel_id = ? WHERE id = ?", (channel_id, account_id))
 
+    async def update_puuid(self, account_id: int, puuid: str) -> None:
+        await self._exec("UPDATE accounts SET puuid = ? WHERE id = ?", (puuid, account_id))
+
     async def update_riot_id(self, puuid: str, game_name: str, tag_line: str) -> None:
         await self._exec("UPDATE accounts SET game_name = ?, tag_line = ? WHERE puuid = ?",
                          (game_name, tag_line, puuid))

@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import aiohttp
 
@@ -12,6 +12,12 @@ log = logging.getLogger(__name__)
 
 PLATFORM_HOST = "https://kr.api.riotgames.com"      # 게임 중 / 랭크 정보
 REGION_HOST = "https://asia.api.riotgames.com"      # 계정 / 매치 정보
+
+
+def _safe_path(url: str) -> str:
+    """로그용 URL 경로. PUUID 같은 긴 값은 …로 줄인다."""
+    path = urlparse(url).path
+    return "/".join("…" if len(seg) > 40 else seg for seg in path.split("/"))
 
 
 class RiotError(Exception):
@@ -70,7 +76,7 @@ class RiotClient:
                     if resp.status == 404:
                         return None
                     if resp.status in (401, 403):
-                        raise RiotAuthError(resp.status, f"API 키 거부됨 - {(await resp.text())[:120]}")
+                        raise RiotAuthError(resp.status, f"접근 거부됨 [{_safe_path(url)}] {(await resp.text())[:120]}")
                     if resp.status == 429:
                         wait = float(resp.headers.get("Retry-After", 5))
                         log.warning("Riot 요청 제한(429) - %.1f초 대기", wait)

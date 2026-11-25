@@ -48,6 +48,10 @@ class Tracker(Notifier):
                 await self.poll_account(acc)
                 self._auth_warned = False
             except RiotAuthError as e:
+                if await self._key_is_valid():
+                    # 키는 정상 - 이 계정/요청만 접근이 거부된 것이므로 나머지 계정은 계속 감시
+                    log.warning("계정 %s 접근 거부 (키는 정상): %s", acc["id"], e)
+                    continue
                 if not self._auth_warned:
                     log.error("Riot API 키 오류: %s - RIOT_API_KEY 를 갱신하고 재시작하세요.", e)
                     self._auth_warned = True
@@ -59,11 +63,41 @@ class Tracker(Notifier):
             except Exception:  # noqa: BLE001
                 log.exception("계정 %s 처리 중 오류", acc["id"])
 
+    async def _key_is_valid(self) -> bool:
+        try:
+            await self.bot.riot.check_key()
+        except RiotAuthError:
+            return False
+        except RiotError:
+            return True   # 네트워크 문제 등은 키 오류로 보지 않는다
+        return True
+
+    async def _repair_puuid(self, acc: dict, err: RiotError) -> bool:
+        """키를 바꾸면 PUUID 암호화가 달라져 저장된 값이 안 맞는다. 닉네임#태그로 다시 조회해 고친다."""
+        is_decrypt = err.status == 400 and "decrypt" in str(err).lower()
+        if not (is_decrypt or (isinstance(err, RiotAuthError) and await self._key_is_valid())):
+            return False
+        try:
+            data = await self.bot.riot.get_account(acc["game_name"], acc["tag_line"])
+        except RiotError:
+            return False
+        if not data or data["puuid"] == acc["puuid"]:
+            return False
+        await self.bot.db.update_puuid(acc["id"], data["puuid"])
+        acc["puuid"] = data["puuid"]
+        log.info("계정 %s: 저장된 PUUID가 현재 키와 맞지 않아 다시 조회해서 갱신했습니다.", acc["id"])
+        return True
+
     # ---- 계정 하나 ----
     async def poll_account(self, acc: dict) -> None:
         db, riot = self.bot.db, self.bot.riot
         active = await db.get_active(acc["id"])
-        game = await riot.get_active_game(acc["puuid"])
+        try:
+            game = await riot.get_active_game(acc["puuid"])
+        except RiotError as e:
+            if not await self._repair_puuid(acc, e):
+                raise
+            game = await riot.get_active_game(acc["puuid"])
 
         if game:
             if active and active["game_id"] != game["gameId"]:
