@@ -44,6 +44,17 @@ def streak_text(results: list[str]) -> str | None:
     return f"🔥 {n}연승 중" if results[0] == "win" else f"🥶 {n}연패 중"
 
 
+def party_text(party: list[dict]) -> str:
+    """party: 같이 하는 것으로 추정되는 팀원 목록 (본인 제외)."""
+    size = len(party) + 1
+    label = "듀오" if size == 2 else f"{size}인큐"
+    lines = [f"👥 **{label}**로 보여요"]
+    for m in party:
+        who = f"{m['name']}#{m['tag']}" if m["tag"] else m["name"]
+        lines.append(f"• {who} — 최근 20판 중 {m['count']}번 같은 팀")
+    return "\n".join(lines)
+
+
 def fmt_duration(seconds: int) -> str:
     return f"{seconds // 60}분 {seconds % 60:02d}초"
 
@@ -60,11 +71,13 @@ def _thumb(embed: discord.Embed, ddragon, champion_id: int) -> None:
 
 
 def build_start_embed(acc: dict, queue_id: int, champion_id: int, start_ts: int,
-                      tier_text: str, ddragon) -> discord.Embed:
+                      tier_text: str, ddragon, party: list[dict] | None = None) -> discord.Embed:
     e = discord.Embed(title=f"🎮 {riot_id(acc)} 님이 게임을 시작했어요!", color=BLUE)
     e.add_field(name="게임 모드", value=queue_name(queue_id), inline=True)
     e.add_field(name="챔피언", value=ddragon.name(champion_id), inline=True)
     e.add_field(name="현재 티어", value=tier_text, inline=True)
+    if party:
+        e.add_field(name="파티 (추정)", value=party_text(party), inline=False)
     e.add_field(name="시작 시각", value=f"<t:{start_ts}:T> (<t:{start_ts}:R>)", inline=False)
     _thumb(e, ddragon, champion_id)
     return e

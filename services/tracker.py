@@ -5,6 +5,7 @@ import json
 import logging
 import time
 
+from services.duo import RECENT_GAMES, detect_party, record_teammates
 from services.notifier import Notifier
 from services.riot_api import RiotAuthError, RiotError
 from utils.embeds import build_end_embed, build_start_embed, deeplol_view, streak_text
@@ -138,8 +139,14 @@ class Tracker(Notifier):
                             json.dumps(snapshot) if snapshot is not None else None)
 
         if acc["notify_start"] and queue_allowed(queue_id, acc["queue_filter"]):
+            try:
+                party = detect_party(game, acc["puuid"], await db.teammate_counts(acc["id"], RECENT_GAMES),
+                                     queue_id)
+            except Exception:  # noqa: BLE001 - 듀오 추정은 부가 기능이라 실패해도 알림은 보낸다
+                log.exception("계정 %s 듀오 추정 실패", acc["id"])
+                party = None
             embed = build_start_embed(acc, queue_id, champion_id, start_ts,
-                                      tier_for_queue(snapshot, queue_id), dd)
+                                      tier_for_queue(snapshot, queue_id), dd, party)
             await self._send(acc, embed=embed, view=deeplol_view(acc["game_name"], acc["tag_line"]),
                              mention=True)
 
@@ -226,6 +233,10 @@ class Tracker(Notifier):
             "ended_ts": int(info["gameEndTimestamp"] / 1000) if info.get("gameEndTimestamp") else int(time.time()),
         }
         added = await db.add_result(acc["id"], row)
+        try:
+            await record_teammates(db, acc["id"], acc["puuid"], match)
+        except Exception:  # noqa: BLE001
+            log.exception("계정 %s 팀원 기록 저장 실패", acc["id"])
         await db.delete_active(acc["id"])
         if not added:
             return

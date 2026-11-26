@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS game_results (
 );
 CREATE INDEX IF NOT EXISTS idx_results_acc_time ON game_results(account_id, ended_ts);
 
+-- 계정별로 같은 팀이었던 사람들 (듀오/N인큐 추정용). 게임당 팀원 4명씩 저장한다.
+CREATE TABLE IF NOT EXISTS teammates (
+    account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    game_id        INTEGER NOT NULL,
+    teammate_puuid TEXT    NOT NULL,
+    game_name      TEXT,
+    tag_line       TEXT,
+    ended_ts       INTEGER NOT NULL,
+    PRIMARY KEY (account_id, game_id, teammate_puuid)
+);
+CREATE INDEX IF NOT EXISTS idx_teammates_acc_time ON teammates(account_id, ended_ts);
+
 CREATE TABLE IF NOT EXISTS daily_reports (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     date       TEXT    NOT NULL,
@@ -195,6 +207,29 @@ class Database:
             "ORDER BY ended_ts",
             (account_id, start_ts, end_ts),
         )
+
+    # ---- 팀원 기록 (듀오 추정) ----
+    async def add_teammates(self, account_id: int, game_id: int, ended_ts: int,
+                            rows: list[tuple[str, str | None, str | None]]) -> None:
+        """rows: (teammate_puuid, game_name, tag_line). 이미 저장된 게임/팀원은 무시."""
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO teammates (account_id, game_id, teammate_puuid, game_name, tag_line, ended_ts) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(account_id, game_id, pu, name, tag, ended_ts) for pu, name, tag in rows],
+        )
+        await self.conn.commit()
+
+    async def teammate_counts(self, account_id: int, games: int = 20) -> dict[str, dict]:
+        """최근 `games`판 동안 같은 팀이었던 횟수. {puuid: {cnt, game_name, tag_line}}"""
+        rows = await self._all(
+            "SELECT teammate_puuid, COUNT(*) AS cnt, MAX(game_name) AS game_name, MAX(tag_line) AS tag_line "
+            "FROM teammates WHERE account_id = ? AND game_id IN ("
+            "  SELECT game_id FROM teammates WHERE account_id = ? "
+            "  GROUP BY game_id ORDER BY MAX(ended_ts) DESC LIMIT ?) "
+            "GROUP BY teammate_puuid",
+            (account_id, account_id, games),
+        )
+        return {r["teammate_puuid"]: r for r in rows}
 
     # ---- 일일 요약 ----
     async def mark_daily_sent(self, account_id: int, date: str) -> bool:

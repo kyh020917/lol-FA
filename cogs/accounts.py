@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -8,6 +9,7 @@ from discord.ext import commands
 
 from cogs._common import (account_autocomplete, find_account, is_admin, parse_riot_id,
                           riot_error_message)
+from services.duo import backfill
 from services.riot_api import RiotError
 from utils.channels import create_alert_channel
 from utils.embeds import BLUE, riot_id
@@ -33,6 +35,7 @@ def settings_embed(acc: dict, title: str) -> discord.Embed:
 class Accounts(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._tasks: set[asyncio.Task] = set()
 
     # ---------- /계정추가 ----------
     @app_commands.command(name="계정추가", description="추적할 롤 계정을 추가하고 알림 채널을 만듭니다 (관리자 전용)")
@@ -73,8 +76,8 @@ class Accounts(commands.Cog):
             return await interaction.followup.send(f"채널 생성에 실패했어요: {e}", ephemeral=True)
 
         try:
-            await db.add_account(interaction.guild_id, channel.id, data["puuid"], data["gameName"],
-                                 data["tagLine"], interaction.user.id)
+            account_id = await db.add_account(interaction.guild_id, channel.id, data["puuid"], data["gameName"],
+                                              data["tagLine"], interaction.user.id)
         except Exception:  # noqa: BLE001
             log.exception("계정 저장 실패 - 만든 채널을 정리합니다")
             await channel.delete(reason="계정 저장 실패")
@@ -88,6 +91,17 @@ class Accounts(commands.Cog):
         await channel.send(embed=welcome)
         await interaction.followup.send(f"✅ `{data['gameName']}#{data['tagLine']}` 추가 완료! {channel.mention}",
                                         ephemeral=True)
+        # 최근 20판 팀원 기록 (듀오 추정용) - 기다리지 않고 뒤에서 채운다
+        task = asyncio.create_task(self._backfill(account_id, data["puuid"]))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _backfill(self, account_id: int, puuid: str) -> None:
+        try:
+            n = await backfill(self.bot.db, self.bot.riot, account_id, puuid)
+            log.info("계정 %s 최근 경기 %d판의 팀원 기록을 저장했습니다.", account_id, n)
+        except Exception:  # noqa: BLE001
+            log.exception("계정 %s 팀원 기록 채우기 실패", account_id)
 
     # ---------- /계정삭제 ----------
     @app_commands.command(name="계정삭제", description="추적 중인 계정을 삭제합니다 (관리자 전용)")
