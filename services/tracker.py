@@ -9,6 +9,7 @@ from services.notifier import Notifier
 from services.riot_api import RiotAuthError, RiotError
 from utils.embeds import build_end_embed, build_start_embed, deeplol_view, streak_text
 from utils.lp import format_delta, format_tier, lp_delta, snapshot_entries
+from utils.performance import analyze
 from utils.queues import RANKED_QUEUES, queue_allowed
 
 log = logging.getLogger(__name__)
@@ -235,7 +236,8 @@ class Tracker(Notifier):
             streak = streak_text(await db.recent_results(acc["id"], queue_id))
             tier_text = tier_for_queue(after_snap, queue_id) if after_snap is not None \
                 else tier_for_queue(before_snap, queue_id)
-            embed = build_end_embed(acc, row, dd, tier_text, lp_detail, streak)
+            perf = None if remake else analyze(match, acc["puuid"], duration)
+            embed = build_end_embed(acc, row, dd, tier_text, lp_detail, streak, perf)
             await self._send(acc, embed=embed, view=deeplol_view(acc["game_name"], acc["tag_line"]))
 
     async def _refresh_riot_id(self, acc: dict) -> None:

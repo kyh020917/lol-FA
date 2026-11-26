@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 import discord
 
+from utils.performance import LUCK_EMOJI
 from utils.queues import ARENA_QUEUES, queue_name
 
 BLUE = 0x3498DB
@@ -70,7 +71,7 @@ def build_start_embed(acc: dict, queue_id: int, champion_id: int, start_ts: int,
 
 
 def build_end_embed(acc: dict, r: dict, ddragon, tier_text: str, lp_detail: str | None,
-                    streak: str | None) -> discord.Embed:
+                    streak: str | None, perf: dict | None = None) -> discord.Embed:
     if r["result"] == "win":
         title, color = f"🏆 승리! — {riot_id(acc)}", GREEN
     elif r["result"] == "loss":
@@ -87,6 +88,17 @@ def build_end_embed(acc: dict, r: dict, ddragon, tier_text: str, lp_detail: str 
     e.add_field(name="챔피언 딜량", value=f"{r['damage']:,}", inline=True)
     if r.get("placement") and r["queue_id"] in ARENA_QUEUES:
         e.add_field(name="순위", value=f"{r['placement']}등", inline=True)
+    if perf:
+        badge = f"  🏅 {perf['badge']}" if perf["badge"] else ""
+        e.add_field(name="개인 점수", value=f"**{perf['score']}점** / 100{badge}", inline=True)
+        e.add_field(name="순위", value=f"{perf['rank']}등 / {perf['total']}명", inline=True)
+        luck = perf["luck"]
+        note = ""
+        if perf["leavers"]["ally"]:
+            note = " (아군 탈주)"
+        elif perf["leavers"]["enemy"]:
+            note = " (적 탈주)"
+        e.add_field(name="팀운", value=f"{LUCK_EMOJI[luck]} **{luck}**{note}", inline=True)
     if lp_detail:
         e.add_field(name="LP 변동", value=lp_detail, inline=False)
     e.add_field(name="현재 티어", value=tier_text, inline=True)
